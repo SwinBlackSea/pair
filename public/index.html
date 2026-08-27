@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#ffffff" />
+    <title>价差哨兵 · Spread Sentinel</title>
+    <link rel="stylesheet" href="/styles.css?v=4" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="titlebar">
+        <div>
+          <h1>价差哨兵</h1>
+          <p class="subtitle"><span class="dot normal pulse"></span>持续观察股票价格与相对收益</p>
+        </div>
+        <div class="header-actions">
+        <button class="button button-ghost" id="refreshAllButton" type="button" title="全部刷新（Space）">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M6.1 9a7 7 0 0 1 11.5-2.6L20 9M4 15l2.4 2.6A7 7 0 0 0 17.9 15"/></svg>
+          全部刷新
+        </button>
+        <button class="button button-primary" id="addButton" type="button" title="新建策略（回车）"><span>＋</span> 新建策略</button>
+        </div>
+      </header>
+
+      <section class="statusline" aria-live="polite">
+        <span class="dot normal"></span>
+        <span id="providerLabel">行情源 —</span>
+        <span class="status-divider">·</span>
+        <span id="intervalMetric">每 10 分钟自动轮询</span>
+        <span class="status-divider">·</span>
+        <span>下次刷新 <b id="countdown">--:--</b></span>
+      </section>
+
+      <section>
+        <div class="toolbar">
+          <div class="filters segments" role="tablist" aria-label="筛选策略">
+            <button class="filter active" data-filter="ALL" role="tab">全部</button>
+            <button class="filter" data-filter="HISTORY" role="tab">触发历史</button>
+            <button class="filter" data-filter="SINGLE" role="tab">单股</button>
+            <button class="filter" data-filter="SPREAD" role="tab">价差</button>
+            <button class="filter" data-filter="GRID" role="tab">网格</button>
+            <button class="filter" data-filter="RANGE" role="tab">区间</button>
+            <button class="filter" data-filter="TRASH" role="tab">回收站</button>
+          </div>
+          <span class="sort-hint">真实行情 · 手动刷新可获取最新价格</span>
+        </div>
+
+        <div class="summary" aria-label="监控摘要">
+          <div class="sum"><span class="sum-label">策略</span><span class="sum-value" id="totalMetric">0</span></div>
+          <div class="sum"><span class="sum-label">监控中</span><span class="sum-value" id="activeMetric">0</span></div>
+          <div class="sum"><span class="sum-label">已触发</span><span class="sum-value alert-value" id="triggeredMetric">0</span></div>
+          <div class="sum"><span class="sum-label">最后刷新</span><span class="sum-value" id="lastRefreshMetric">—</span></div>
+        </div>
+
+        <div class="frame">
+          <table id="strategyTable">
+            <colgroup>
+              <col class="strategy-col" />
+              <col class="relation-col" />
+              <col class="price-col" />
+              <col class="return-col" />
+              <col class="threshold-col" />
+              <col class="state-col" />
+              <col class="action-col" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th class="strategy-col">策略</th>
+                <th class="relation-col" id="relationHeader">监控关系</th>
+                <th class="price-col" id="priceHeader">现价 / 基准</th>
+                <th class="return-col num" id="metricHeader">当前价差</th>
+                <th class="threshold-col num" id="thresholdHeader">触发线</th>
+                <th class="state-col">状态</th>
+                <th class="action-col"></th>
+              </tr>
+            </thead>
+            <tbody id="strategyGrid" aria-live="polite"></tbody>
+          </table>
+          <table id="historyTable" class="history-table" hidden>
+            <colgroup>
+              <col class="history-time-col" />
+              <col class="history-strategy-col" />
+              <col class="history-signal-col" />
+              <col class="history-status-col" />
+              <col class="history-result-col" />
+              <col class="history-details-col" />
+              <col class="history-action-col" />
+            </colgroup>
+            <thead><tr><th>触发时间</th><th>策略</th><th>触发快照</th><th>处置状态</th><th class="num">相对收益</th><th class="num">执行明细</th><th></th></tr></thead>
+            <tbody id="historyGrid" aria-live="polite"></tbody>
+          </table>
+          <div id="emptyState" class="empty-state" hidden>
+            <h3>还没有监控策略</h3>
+            <p>新建单股、价差或网格策略，持续监控交易机会。</p>
+            <button class="button" id="emptyAddButton" type="button">新建策略</button>
+          </div>
+          <div id="emptyHistory" class="empty-state" hidden>
+            <h3>还没有触发记录</h3>
+            <p>策略首次越过触发线后，会在这里生成一条历史快照。</p>
+          </div>
+        </div>
+        <footer class="foot">
+          <span>价格仅用于策略提醒，不构成投资建议</span>
+          <span>后台自动刷新已启用</span>
+        </footer>
+      </section>
+    </main>
+
+    <dialog id="strategyDialog" class="strategy-dialog">
+      <form id="strategyForm" method="dialog" novalidate>
+        <div class="dialog-head">
+          <div>
+            <p class="section-kicker" id="dialogKicker">NEW SIGNAL RULE</p>
+            <h2 id="dialogTitle">新建策略</h2>
+          </div>
+          <button class="icon-button close-dialog" type="button" aria-label="关闭">×</button>
+        </div>
+
+        <div class="form-body">
+          <fieldset class="type-switch" id="typeSwitch">
+            <legend>策略类型</legend>
+            <label>
+              <input type="radio" name="type" value="SINGLE" checked />
+              <span><b>单股价格</b><small>相对基准价的涨跌提醒</small></span>
+            </label>
+            <label>
+              <input type="radio" name="type" value="SPREAD" />
+              <span><b>A / B 价差</b><small>两只股票的相对收益轮动</small></span>
+            </label>
+            <label>
+              <input type="radio" name="type" value="GRID" />
+              <span><b>网格交易</b><small>跨档低买高卖提醒</small></span>
+            </label>
+            <label>
+              <input type="radio" name="type" value="RANGE" />
+              <span><b>区间交易</b><small>下限买入、上限卖出</small></span>
+            </label>
+          </fieldset>
+
+          <label class="field field-wide">
+            <span>策略名称</span>
+            <input name="name" maxlength="80" required placeholder="例如：茅台回撤补仓" />
+          </label>
+
+          <fieldset class="trigger-mode single-only" id="triggerModeSwitch">
+            <legend>单股触发方式</legend>
+            <label>
+              <input type="radio" name="triggerMode" value="THRESHOLD_PCT" checked />
+              <span><b>按涨跌幅</b><small>达到百分比阈值时提醒</small></span>
+            </label>
+            <label>
+              <input type="radio" name="triggerMode" value="TARGET_PRICE" />
+              <span><b>按目标价格</b><small>达到指定价格时提醒</small></span>
+            </label>
+          </fieldset>
+
+          <div class="form-grid">
+            <label class="field">
+              <span id="symbolALabel">股票代码</span>
+              <div class="symbol-picker" data-symbol-picker>
+                <input name="symbolA" required autocomplete="off" placeholder="&#x8F93;&#x5165;&#x6807;&#x7684;&#x540D;&#x79F0; / &#x4EE3;&#x7801;&#xFF0C;&#x5982;&#x201C;&#x8305;&#x53F0;&#x201D;" aria-autocomplete="list" aria-controls="symbolSuggestionsA" />
+                <div class="symbol-suggestions" id="symbolSuggestionsA" role="listbox" hidden></div>
+              </div>
+              <small id="symbolAHint" class="symbol-hint">支持中文名称、拼音或代码；请选择联想结果</small>
+            </label>
+            <label class="field spread-only" hidden>
+              <span>期望持有 · 代码 B</span>
+              <div class="symbol-picker" data-symbol-picker>
+                <input name="symbolB" autocomplete="off" placeholder="&#x8F93;&#x5165;&#x6807;&#x7684;&#x540D;&#x79F0; / &#x4EE3;&#x7801;&#xFF0C;&#x5982;&#x201C;&#x817E;&#x8BAF;&#x201D;" aria-autocomplete="list" aria-controls="symbolSuggestionsB" />
+                <div class="symbol-suggestions" id="symbolSuggestionsB" role="listbox" hidden></div>
+              </div>
+              <small class="symbol-hint">选择 A / B 标的后自动带入最新价</small>
+            </label>
+            <label class="field spread-only" hidden>
+              <span>A 基准价 <i>选择标的后自动填充</i></span>
+              <input name="basePriceA" type="number" min="0.001" step="0.001" placeholder="选择标的后自动填充" />
+            </label>
+            <label class="field spread-only" hidden>
+              <span>B 基准价 <i>选择标的后自动填充</i></span>
+              <input name="basePriceB" type="number" min="0.001" step="0.001" placeholder="选择标的后自动填充" />
+            </label>
+            <label class="field single-only">
+              <span id="referencePriceLabel">基准价格</span>
+              <div class="input-unit"><input name="referencePrice" type="number" min="0.001" step="0.001" placeholder="选择标的后自动填充" /><i>¥</i></div>
+              <small id="referencePriceHint">选择标的后自动带入最新价格，也可手动修改</small>
+            </label>
+            <label class="field single-only target-price-only" hidden>
+              <span>目标价格</span>
+              <div class="input-unit"><input name="targetPrice" type="number" min="0.001" step="0.001" placeholder="目标价格" /><i>¥</i></div>
+              <small>上涨目标价需高于当前价格，下跌目标价需低于当前价格</small>
+            </label>
+            <label class="field boundary-only" hidden>
+              <span id="lowerPriceLabel">网格价格下限</span>
+              <div class="input-unit"><input name="lowerPrice" type="number" min="0.001" step="0.001" placeholder="例如 400" /><i>¥</i></div>
+            </label>
+            <label class="field boundary-only" hidden>
+              <span id="upperPriceLabel">网格价格上限</span>
+              <div class="input-unit"><input name="upperPrice" type="number" min="0.001" step="0.001" placeholder="例如 500" /><i>¥</i></div>
+            </label>
+            <label class="field grid-only" hidden>
+              <span>网格数量 <i>2–200 格</i></span>
+              <input name="gridCount" type="number" min="2" max="200" step="1" placeholder="例如 10" />
+            </label>
+            <label class="field percentage-only">
+              <span>触发阈值</span>
+              <div class="input-unit"><input name="thresholdPct" type="number" min="0.01" step="0.01" required placeholder="5.00" /><i>%</i></div>
+            </label>
+            <label class="field single-only">
+              <span>触发方向</span>
+              <select name="direction">
+                <option value="RISE">上涨达到阈值</option>
+                <option value="FALL">下跌达到阈值</option>
+              </select>
+            </label>
+            <label class="field single-only">
+              <span>触发后提示</span>
+              <select name="action">
+                <option value="SELL">提示卖出</option>
+                <option value="BUY">提示买入</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="spread-explainer spread-only" hidden>
+            <span>A/B</span>
+            <p><b>触发逻辑</b>持有的 A 相对期望的 B 超额收益达到阈值时，提示“卖 A、买 B”。基准价可手动填写；留空时在创建策略时自动采集。</p>
+          </div>
+
+          <div class="spread-explainer grid-only" hidden>
+            <span>GRID</span>
+            <p><b>跨档逻辑</b>首次行情只定位当前档位；价格向下跨档提示买入，向上跨档提示卖出。一次跨越多档时合并为一条提醒。</p>
+          </div>
+
+          <div class="spread-explainer range-only" hidden>
+            <span>RANGE</span>
+            <p><b>边界逻辑</b>价格达到下限时提示买入，达到上限时提示卖出；持续越界不重复提醒，回到区间后可再次触发。</p>
+          </div>
+
+          <label class="field field-wide">
+            <span>备注 <i>选填</i></span>
+            <textarea name="notes" rows="3" maxlength="500" placeholder="记录你的判断依据或执行约束…"></textarea>
+          </label>
+
+          <label class="toggle-field">
+            <span><b>启用自动监控</b><small>后台每 10 分钟刷新一次行情</small></span>
+            <input type="checkbox" name="enabled" checked /><i></i>
+          </label>
+          <label class="reset-baseline spread-only" hidden>
+            <input type="checkbox" name="resetBaseline" /> 使用最新行情重新采集 A / B 基准价
+          </label>
+        </div>
+
+        <div class="dialog-actions">
+          <button class="button button-ghost close-dialog" type="button">取消</button>
+          <button class="button button-primary" id="saveButton" type="submit">保存并获取行情</button>
+        </div>
+      </form>
+      <div id="dialogToastRegion" class="toast-region" aria-live="assertive"></div>
+    </dialog>
+
+    <dialog id="executionDialog" class="strategy-dialog execution-dialog">
+      <form id="executionForm" method="dialog" novalidate>
+        <div class="dialog-head">
+          <div><p class="section-kicker">RECORD EXECUTION</p><h2>记录执行</h2></div>
+          <button class="icon-button close-execution-dialog" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="form-body">
+          <div id="executionSummary" class="execution-summary"></div>
+          <div id="executionLegs" class="execution-legs"></div>
+          <label class="field" id="executionFxField" hidden>
+            <span>港币兑人民币汇率 <i>1 HKD = ? CNY</i></span>
+            <input id="executionFxRate" type="number" min="0.000001" step="0.000001" inputmode="decimal" />
+            <small id="executionFxHint">用于将港币收益折算成人民币，保存后锁定</small>
+          </label>
+          <p class="execution-help">历史收益按触发时基准价、实际执行价和执行数量计算；混合币种按锁定汇率折合为人民币总收益。</p>
+        </div>
+        <div class="dialog-actions">
+          <button class="button button-ghost close-execution-dialog" type="button">取消</button>
+          <button class="button button-primary" id="saveExecutionButton" type="submit">确认已执行</button>
+        </div>
+      </form>
+      <div id="executionToastRegion" class="toast-region" aria-live="assertive"></div>
+    </dialog>
+
+    <div id="toastRegion" class="toast-region" aria-live="assertive"></div>
+
+    <template id="strategyCardTemplate">
+      <tr class="strategy-card">
+        <td class="strategy-primary">
+          <div><span class="strategy-name"><h3></h3><span class="trigger-count-badge" hidden></span></span><span class="type-badge"></span></div>
+          <span class="refreshed-time"></span>
+        </td>
+        <td class="relation-cell">
+          <p class="symbol-line"></p>
+          <p class="strategy-notes" hidden></p>
+          <p class="signal-message"></p>
+        </td>
+        <td class="price-row"></td>
+        <td class="metric-cell num">
+          <small class="metric-label"></small>
+          <strong class="metric-value"></strong>
+          <div class="progress-track"><i></i><span></span></div>
+        </td>
+        <td class="threshold-cell num"><b class="threshold-value"></b></td>
+        <td><span class="state-badge"></span></td>
+        <td class="action-cell">
+          <button class="icon-button refresh-one" data-action="refresh" aria-label="刷新策略" title="刷新策略">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M6.1 9a7 7 0 0 1 11.5-2.6L20 9M4 15l2.4 2.6A7 7 0 0 0 17.9 15"/></svg>
+          </button>
+          <span class="card-heading">
+            <button class="icon-button menu-button" aria-label="更多操作">•••</button>
+            <span class="card-menu" hidden>
+              <button data-action="edit">编辑策略</button>
+              <button data-action="toggle"></button>
+              <button class="danger" data-action="delete">删除策略</button>
+            </span>
+          </span>
+        </td>
+      </tr>
+    </template>
+
+    <template id="historyRowTemplate">
+      <tr class="history-row">
+        <td><time class="history-time"></time></td>
+        <td class="history-primary"><b></b><small></small></td>
+        <td class="history-signal"><p></p><small></small></td>
+        <td><span class="history-status"></span></td>
+        <td class="history-result num"></td>
+        <td class="history-details num"></td>
+        <td class="history-actions">
+          <button class="history-action" data-history-action="PENDING" type="button">未执行</button>
+          <button class="history-action execute" data-history-action="EXECUTED" type="button">已执行</button>
+          <button class="history-action skip" data-history-action="SKIPPED" type="button">不执行</button>
+        </td>
+      </tr>
+    </template>
+
+    <script type="module" src="/app.js?v=34"></script>
+  </body>
+</html>

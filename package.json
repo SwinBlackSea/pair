@@ -1,0 +1,15 @@
+{
+  "name": "spread-sentinel",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "股票价格与价差策略监控服务",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
